@@ -1,16 +1,16 @@
 """Pygame entrypoint.
 
-Native:
-    python main.py                                    # Phase 2 baseline, observer
-    python main.py --species classic                  # Phase 1 roster, observer
-    python main.py --species phase2 --play            # play (biomes on by default)
-    python main.py --species phase2 --biomes          # observer with biomes
-    python main.py --species phase2 --play --no-biomes  # play on a flat grid
+Culture Sort (L/R) — default mode:
+    python main.py
+    python main.py --seed 42
+
+Legacy foodchain sim (observer / play):
+    python main.py --foodchain
+    python main.py --foodchain --species phase2 --play
 
 Browser (via pygbag):
-    When sys.platform is "emscripten" (Pyodide), we skip argparse entirely
-    and go straight into play mode with the Phase 2 roster + biomes. argparse
-    reading sys.argv in the browser can silently SystemExit in some setups.
+    When sys.platform is "emscripten" (Pyodide), we skip argparse and run
+    Culture Sort in portrait mode.
 """
 import asyncio
 import os
@@ -23,19 +23,16 @@ import sys
 # import at module level is load-bearing for the web build.
 import pygame  # noqa: F401  — load-bearing for pygbag dep detection
 
-# Prints to stdout show up in the browser DevTools console under pygbag —
-# these give us boot milestones so a blank screen isn't a total mystery.
-print("[foodchain] boot: importing app", flush=True)
+print("[lr] boot: importing app", flush=True)
 
-# Under pygbag, main.py's directory isn't automatically on sys.path (unlike
-# native `python main.py`). Our `from foodchain.render...` imports then fail
-# silently. Adding the dir here makes the package importable in both runtimes.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
-    print(f"[foodchain] sys.path += {_THIS_DIR}", flush=True)
+    print(f"[lr] sys.path += {_THIS_DIR}", flush=True)
 
-from foodchain.render.pygame_view import App
+from foodchain.lr.config import LRConfig
+from foodchain.render.lr_view import LRApp
+from foodchain.render.pygame_view import App as FoodchainApp
 from foodchain.sim import SimConfig
 from foodchain.sim.config import CLASSIC_SPECIES, PHASE2_SPECIES
 
@@ -48,43 +45,51 @@ IS_BROWSER = sys.platform in ("emscripten", "wasi")
 
 
 def _browser_config():
-    """Hard-coded config for the browser build — no argparse."""
-    cfg = SimConfig(seed=12, species=list(PHASE2_SPECIES))
-    cfg.terrain_forest_frac = DEFAULT_FOREST_FRAC
-    cfg.terrain_water_frac = DEFAULT_WATER_FRAC
-    return cfg, True
+    return LRConfig(seed=12)
 
 
 def _native_config():
     import argparse
+
     p = argparse.ArgumentParser()
-    p.add_argument("--species", choices=ROSTERS, default="phase2")
+    p.add_argument(
+        "--foodchain",
+        action="store_true",
+        help="run legacy foodchain sim instead of Culture Sort",
+    )
     p.add_argument("--seed", type=int, default=12)
-    p.add_argument("--play", action="store_true", help="player-controlled mode")
+    p.add_argument("--agents", type=int, default=30, help="agents per run (LR mode)")
+    p.add_argument("--species", choices=ROSTERS, default="phase2")
+    p.add_argument("--play", action="store_true", help="foodchain player mode")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--biomes", dest="biomes", action="store_true")
     group.add_argument("--no-biomes", dest="biomes", action="store_false")
     p.set_defaults(biomes=None)
     args = p.parse_args()
 
-    if args.biomes is None:
-        args.biomes = args.play
+    if args.foodchain:
+        if args.biomes is None:
+            args.biomes = args.play
+        cfg = SimConfig(seed=args.seed, species=list(ROSTERS[args.species]))
+        if args.biomes:
+            cfg.terrain_forest_frac = DEFAULT_FOREST_FRAC
+            cfg.terrain_water_frac = DEFAULT_WATER_FRAC
+        return "foodchain", cfg, args.play
 
-    cfg = SimConfig(seed=args.seed, species=list(ROSTERS[args.species]))
-    if args.biomes:
-        cfg.terrain_forest_frac = DEFAULT_FOREST_FRAC
-        cfg.terrain_water_frac = DEFAULT_WATER_FRAC
-    return cfg, args.play
+    return "lr", LRConfig(seed=args.seed, total_agents=args.agents), False
 
 
 async def main() -> None:
-    print(f"[foodchain] platform={sys.platform} browser={IS_BROWSER}", flush=True)
+    print(f"[lr] platform={sys.platform} browser={IS_BROWSER}", flush=True)
     if IS_BROWSER:
-        cfg, play = _browser_config()
+        mode, cfg, play = "lr", _browser_config(), False
     else:
-        cfg, play = _native_config()
-    print(f"[foodchain] starting app play={play}", flush=True)
-    await App(cfg, play=play).run()
+        mode, cfg, play = _native_config()
+    print(f"[lr] starting mode={mode}", flush=True)
+    if mode == "lr":
+        await LRApp(cfg).run()
+    else:
+        await FoodchainApp(cfg, play=play).run()
 
 
 if __name__ == "__main__":

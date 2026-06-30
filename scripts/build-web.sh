@@ -14,7 +14,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 APP_NAME="foodchain"
-APP_TITLE="Food Chain"
+APP_TITLE="Culture Sort"
 
 echo ">> cleaning previous build"
 rm -rf build/web build/web.zip
